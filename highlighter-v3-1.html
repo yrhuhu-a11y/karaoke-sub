@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>螢光筆字幕</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #111; --surface: #1c1c1e; --border: #2c2c2e;
+    --accent: #ffd60a; --text: #f5f5f7; --muted: #8e8e93;
+    --green: #30d158; --radius: 14px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Noto Sans TC', sans-serif; min-height: 100vh; padding-bottom: 60px; }
+
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 20px; position: sticky; top: 0; z-index: 100; }
+  .topbar-title { font-size: 17px; font-weight: 700; }
+  .topbar-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .content { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  .card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+  .card-header { padding: 13px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .card-num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #000; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .card-num.done { background: var(--green); color: #000; }
+  .card-title { font-size: 15px; font-weight: 600; }
+  .card-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+  .upload-btn { width: 100%; padding: 24px 16px; border: 2px dashed var(--border); border-radius: 12px; background: transparent; color: var(--text); font-size: 15px; cursor: pointer; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .upload-btn .icon { font-size: 40px; }
+  .upload-btn .label { font-weight: 600; }
+  .upload-btn .sub { font-size: 12px; color: var(--muted); }
+
+  .color-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .color-opt { width: 38px; height: 38px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; position: relative; transition: transform 0.15s; }
+  .color-opt.active { border-color: white; transform: scale(1.12); }
+  .color-opt.active::after { content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; color: #000; }
+  .slider-row { display: flex; align-items: center; gap: 10px; }
+  .slider-row label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  input[type=range] { flex: 1; appearance: none; height: 4px; background: var(--border); border-radius: 2px; }
+  input[type=range]::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+  .slider-val { font-size: 13px; color: var(--accent); min-width: 34px; text-align: right; }
+
+  .status-box { border-radius: 10px; padding: 12px 14px; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+  .status-box.loading { background: rgba(255,214,10,0.08); border: 1px solid rgba(255,214,10,0.2); color: var(--accent); }
+  .status-box.done { background: rgba(48,209,88,0.08); border: 1px solid rgba(48,209,88,0.2); color: var(--green); }
+  .status-box.error { background: rgba(255,69,58,0.08); border: 1px solid rgba(255,69,58,0.2); color: #ff453a; }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .video-wrap { position: relative; background: #000; border-radius: 10px; overflow: hidden; touch-action: none; }
+  .video-wrap video { width: 100%; display: block; max-height: 45vh; object-fit: contain; }
+  .video-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .draw-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: none; }
+  .draw-overlay.active { display: block; }
+  .sel-rect { position: absolute; border: 2px solid var(--accent); background: rgba(255,214,10,0.15); border-radius: 4px; pointer-events: none; display: none; z-index: 11; }
+
+  .draw-banner { background: var(--accent); color: #000; border-radius: 10px; padding: 12px 16px; font-size: 14px; font-weight: 600; display: none; align-items: center; justify-content: space-between; }
+  .draw-banner.visible { display: flex; }
+  .draw-banner button { background: rgba(0,0,0,0.15); border: none; border-radius: 8px; color: #000; font-weight: 700; font-size: 13px; padding: 6px 12px; cursor: pointer; font-family: inherit; }
+
+  .seg-list { display: flex; flex-direction: column; gap: 8px; }
+  .seg-card { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; display: flex; gap: 10px; align-items: center; cursor: pointer; transition: border-color 0.15s; }
+  .seg-card.active { border-color: var(--accent); background: rgba(255,214,10,0.05); }
+  .seg-card.has-box { border-color: var(--green); }
+  .seg-card.has-box.active { border-color: var(--accent); }
+  .seg-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+  .seg-text-display { font-size: 14px; line-height: 1.4; word-break: break-all; }
+  .seg-times { font-size: 11px; color: var(--muted); }
+  .seg-badge { font-size: 10px; background: var(--green); color: #000; border-radius: 4px; padding: 2px 6px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+
+  .btn { width: 100%; padding: 15px; border-radius: var(--radius); border: none; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: opacity 0.15s, transform 0.1s; }
+  .btn:active { transform: scale(0.97); opacity: 0.8; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 12px; }
+  .btn-sm { width: auto; padding: 7px 12px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .progress-wrap { display: none; }
+  .progress-wrap.visible { display: block; }
+  .progress-bg { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 8px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #ff9f0a); border-radius: 4px; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+
+  .note { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-title">✨ 螢光筆字幕</div>
+  <div class="topbar-sub">用 AI 自動辨識語音，不需下載模型</div>
+</div>
+
+<div class="content">
+
+  <!-- Step 1 -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-num" id="num1">1</div>
+      <div class="card-title">上傳影片</div>
+    </div>
+    <div class="card-body">
+      <label class="upload-btn" for="fileInput">
+        <span class="icon">🎬</span>
+        <span class="label" id="uploadLabel">點此選擇影片</span>
+        <span class="sub">MP4、MOV、WebM（建議100MB以下）</span>
+      </label>
+      <input type="file" id="fileInput" accept="video/*" style="display:none">
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-num">2</div>
+      <div class="card-title">選擇螢光筆顏色</div>
+    </div>
+    <div class="card-body">
+      <div class="color-row" id="colorRow">
+        <div class="color-opt active" style="background:#ffd60a" data-rgba="255,214,10"></div>
+        <div class="color-opt" style="background:#ff6b6b" data-rgba="255,107,107"></div>
+        <div class="color-opt" style="background:#4ade80" data-rgba="74,222,128"></div>
+        <div class="color-opt" style="background:#60a5fa" data-rgba="96,165,250"></div>
+        <div class="color-opt" style="background:#f472b6" data-rgba="244,114,182"></div>
+        <div class="color-opt" style="background:#fb923c" data-rgba="251,146,60"></div>
+      </div>
+      <div class="slider-row">
+        <label>透明度</label>
+        <input type="range" id="opacitySlider" min="20" max="75" value="45">
+        <span class="slider-val" id="opacityVal">45%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: AI transcribe -->
+  <div class="card hidden" id="step3">
+    <div class="card-header">
+      <div class="card-num" id="num3">3</div>
+      <div class="card-title">AI 語音辨識</div>
+    </div>
+    <div class="card-body">
+      <div id="statusBox" class="status-box loading" style="display:none"></div>
+      <button class="btn btn-primary" id="transcribeBtn">🎙️ 開始辨識語音</button>
+      <p class="note">會把音訊傳給 Claude AI 辨識，需要網路，但不需要下載模型。約 30 秒完成。</p>
+    </div>
+  </div>
+
+  <!-- Step 4: Mark positions -->
+  <div class="card hidden" id="step4">
+    <div class="card-header">
+      <div class="card-num" id="num4">4</div>
+      <div class="card-title">框選字幕位置</div>
+    </div>
+    <div class="card-body">
+      <p class="note">點下方某段字幕 → 用手指在影片上框出那行字的範圍</p>
+
+      <div class="draw-banner" id="drawBanner">
+        <span>✏️ 用手指框選字幕位置</span>
+        <button id="cancelDraw">取消</button>
+      </div>
+
+      <div class="video-wrap" id="videoWrap">
+        <video id="previewVideo" playsinline webkit-playsinline controls></video>
+        <canvas id="previewCanvas"></canvas>
+        <div class="draw-overlay" id="drawOverlay"></div>
+        <div class="sel-rect" id="selRect"></div>
+      </div>
+
+      <div class="seg-list" id="segList"></div>
+    </div>
+  </div>
+
+  <!-- Step 5: Export -->
+  <div class="card hidden" id="step5">
+    <div class="card-header">
+      <div class="card-num">5</div>
+      <div class="card-title">匯出影片</div>
+    </div>
+    <div class="card-body">
+      <p class="note">⚠️ 匯出格式為 WebM。需要 MP4 可之後用電腦轉換。</p>
+      <button class="btn btn-primary" id="exportBtn">⬇️ 匯出影片</button>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-label">
+          <span id="progressLabel">合成中…</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-bg">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let segments = [];
+let hlRgba = '255,214,10';
+let hlOpacity = 0.45;
+let drawingSegIdx = null;
+let drawStart = null;
+let isDrawing = false;
+let videoFile = null;
+
+const previewVideo = document.getElementById('previewVideo');
+const previewCanvas = document.getElementById('previewCanvas');
+const drawOverlay = document.getElementById('drawOverlay');
+const selRect = document.getElementById('selRect');
+const segList = document.getElementById('segList');
+const drawBanner = document.getElementById('drawBanner');
+const videoWrap = document.getElementById('videoWrap');
+const statusBox = document.getElementById('statusBox');
+
+// Upload
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  videoFile = file;
+  previewVideo.src = URL.createObjectURL(file);
+  document.getElementById('uploadLabel').textContent = file.name;
+  document.getElementById('num1').textContent = '✓';
+  document.getElementById('num1').classList.add('done');
+  document.getElementById('step3').classList.remove('hidden');
+});
+
+// Color
+document.getElementById('colorRow').addEventListener('click', e => {
+  const opt = e.target.closest('.color-opt');
+  if (!opt) return;
+  document.querySelectorAll('.color-opt').forEach(o => o.classList.remove('active'));
+  opt.classList.add('active');
+  hlRgba = opt.dataset.rgba;
+});
+
+document.getElementById('opacitySlider').addEventListener('input', e => {
+  hlOpacity = e.target.value / 100;
+  document.getElementById('opacityVal').textContent = e.target.value + '%';
+  drawHighlight();
+});
+
+// Transcribe via Claude API
+document.getElementById('transcribeBtn').addEventListener('click', async () => {
+  if (!videoFile) return;
+  const btn = document.getElementById('transcribeBtn');
+  btn.disabled = true;
+  showStatus('loading', '<span class="spin">⏳</span> 抽取音訊中…');
+
+  try {
+    // Extract audio as base64
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const arrayBuf = await videoFile.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+
+    // Convert to WAV base64
+    const wavBuf = audioBufferToWav(audioBuf);
+    const uint8 = new Uint8Array(wavBuf);
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      binary += String.fromCharCode(...uint8.subarray(i, i + chunkSize));
+    }
+    const base64Audio = btoa(binary);
+
+    showStatus('loading', '<span class="spin">⏳</span> AI 辨識語音中（約30秒）…');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'audio/wav', data: base64Audio }
+            },
+            {
+              type: 'text',
+              text: '請逐句轉錄這段音訊，並估算每句話的開始和結束時間（秒）。只輸出JSON，格式：{"segments":[{"start":0.0,"end":2.5,"text":"文字"},...]}'
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.error) throw new Error(data.error.message);
+
+    const text = data.content.map(c => c.text || '').join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    segments = parsed.segments || [];
+
+    if (segments.length === 0) throw new Error('沒有辨識到語音');
+
+    showStatus('done', `✅ 辨識完成！共 ${segments.length} 段`);
+    document.getElementById('num3').textContent = '✓';
+    document.getElementById('num3').classList.add('done');
+    document.getElementById('step4').classList.remove('hidden');
+    document.getElementById('step5').classList.remove('hidden');
+    renderSegList();
+
+  } catch(err) {
+    showStatus('error', '❌ 失敗：' + err.message);
+    btn.disabled = false;
+    console.error(err);
+  }
+});
+
+function showStatus(type, html) {
+  statusBox.style.display = 'flex';
+  statusBox.className = 'status-box ' + type;
+  statusBox.innerHTML = html;
+}
+
+// WAV encoder
+function audioBufferToWav(buffer) {
+  const numCh = 1;
+  const sampleRate = buffer.sampleRate;
+  const samples = buffer.getChannelData(0);
+  const len = samples.length;
+  const wavBuf = new ArrayBuffer(44 + len * 2);
+  const view = new DataView(wavBuf);
+  const writeStr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + len * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, len * 2, true);
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    off += 2;
+  }
+  return wavBuf;
+}
+
+function renderSegList() {
+  segList.innerHTML = '';
+  segments.forEach((seg, i) => {
+    const card = document.createElement('div');
+    card.className = 'seg-card' + (seg.box ? ' has-box' : '');
+    card.dataset.idx = i;
+
+    const info = document.createElement('div');
+    info.className = 'seg-info';
+    const textEl = document.createElement('div');
+    textEl.className = 'seg-text-display';
+    textEl.textContent = seg.text;
+    const timeEl = document.createElement('div');
+    timeEl.className = 'seg-times';
+    timeEl.textContent = fmt(seg.start) + ' → ' + fmt(seg.end);
+    info.appendChild(textEl);
+    info.appendChild(timeEl);
+
+    const drawBtn = document.createElement('button');
+    drawBtn.className = 'btn btn-secondary btn-sm';
+    drawBtn.textContent = seg.box ? '重新框' : '框選';
+    drawBtn.addEventListener('click', e => { e.stopPropagation(); startDraw(i); });
+
+    card.appendChild(info);
+    if (seg.box) {
+      const badge = document.createElement('div');
+      badge.className = 'seg-badge';
+      badge.textContent = '已框';
+      card.appendChild(badge);
+    }
+    card.appendChild(drawBtn);
+    card.addEventListener('click', () => { previewVideo.currentTime = seg.start; });
+    segList.appendChild(card);
+  });
+}
+
+function startDraw(idx) {
+  drawingSegIdx = idx;
+  previewVideo.currentTime = segments[idx].start;
+  previewVideo.pause();
+  drawOverlay.classList.add('active');
+  drawBanner.classList.add('visible');
+  videoWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.querySelectorAll('.seg-card').forEach((c, i) => c.classList.toggle('active', i === idx));
+}
+
+document.getElementById('cancelDraw').addEventListener('click', () => {
+  drawOverlay.classList.remove('active');
+  drawBanner.classList.remove('visible');
+  drawingSegIdx = null;
+  selRect.style.display = 'none';
+});
+
+function getPos(e, el) {
+  const rect = el.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return { x: (clientX - rect.left) / rect.width, y: (clientY - rect.top) / rect.height };
+}
+
+function updateSelRect(a, b) {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+  selRect.style.cssText = `display:block;left:${x*100}%;top:${y*100}%;width:${w*100}%;height:${h*100}%;position:absolute;border:2px solid var(--accent);background:rgba(255,214,10,0.15);border-radius:4px;pointer-events:none;z-index:11;`;
+}
+
+function finishDraw(a, b) {
+  selRect.style.display = 'none';
+  if (drawingSegIdx === null) return;
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+  if (w < 0.05 || h < 0.01) return;
+  const justDone = drawingSegIdx;
+  segments[justDone].box = { x, y, w, h };
+  drawOverlay.classList.remove('active');
+  drawBanner.classList.remove('visible');
+  drawingSegIdx = null;
+  renderSegList();
+  const next = segments.findIndex((s, i) => i > justDone && !s.box);
+  if (next !== -1) setTimeout(() => startDraw(next), 400);
+}
+
+drawOverlay.addEventListener('touchstart', e => { e.preventDefault(); isDrawing = true; drawStart = getPos(e, videoWrap); updateSelRect(drawStart, drawStart); }, { passive: false });
+drawOverlay.addEventListener('touchmove', e => { e.preventDefault(); if (!isDrawing) return; updateSelRect(drawStart, getPos(e, videoWrap)); }, { passive: false });
+drawOverlay.addEventListener('touchend', e => { e.preventDefault(); if (!isDrawing) return; isDrawing = false; finishDraw(drawStart, getPos({ touches: e.changedTouches }, videoWrap)); });
+drawOverlay.addEventListener('mousedown', e => { isDrawing = true; drawStart = getPos(e, videoWrap); });
+drawOverlay.addEventListener('mousemove', e => { if (!isDrawing) return; updateSelRect(drawStart, getPos(e, videoWrap)); });
+drawOverlay.addEventListener('mouseup', e => { if (!isDrawing) return; isDrawing = false; finishDraw(drawStart, getPos(e, videoWrap)); });
+
+previewVideo.addEventListener('timeupdate', drawHighlight);
+previewVideo.addEventListener('seeked', drawHighlight);
+
+function drawHighlight() {
+  const canvas = previewCanvas;
+  const video = previewVideo;
+  canvas.width = video.videoWidth || video.clientWidth;
+  canvas.height = video.videoHeight || video.clientHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const t = video.currentTime;
+  const seg = segments.find(s => t >= s.start && t <= s.end + 0.05);
+  if (!seg || !seg.box) return;
+  const progress = Math.min(1, (t - seg.start) / Math.max(0.1, seg.end - seg.start));
+  const { x, y, w, h } = seg.box;
+  ctx.fillStyle = `rgba(${hlRgba},${hlOpacity})`;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x * canvas.width, y * canvas.height, w * canvas.width * progress, h * canvas.height, h * canvas.height * 0.3);
+  else ctx.rect(x * canvas.width, y * canvas.height, w * canvas.width * progress, h * canvas.height);
+  ctx.fill();
+}
+
+// Export
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  const exportBtn = document.getElementById('exportBtn');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressPct = document.getElementById('progressPct');
+  const progressLabel = document.getElementById('progressLabel');
+
+  exportBtn.disabled = true;
+  progressWrap.classList.add('visible');
+
+  try {
+    const srcVideo = document.createElement('video');
+    srcVideo.src = previewVideo.src;
+    await new Promise(r => { srcVideo.onloadedmetadata = r; });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = srcVideo.videoWidth;
+    canvas.height = srcVideo.videoHeight;
+    const ctx = canvas.getContext('2d');
+    const duration = srcVideo.duration;
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+    const src = audioCtx.createMediaElementSource(srcVideo);
+    src.connect(dest); src.connect(audioCtx.destination);
+
+    const stream = canvas.captureStream(30);
+    dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6000000 });
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.start(100);
+    srcVideo.play();
+
+    function drawFrame() {
+      if (srcVideo.ended || srcVideo.currentTime >= duration - 0.05) { recorder.stop(); return; }
+      ctx.drawImage(srcVideo, 0, 0, canvas.width, canvas.height);
+      const t = srcVideo.currentTime;
+      const seg = segments.find(s => t >= s.start && t <= s.end + 0.05);
+      if (seg && seg.box) {
+        const progress = Math.min(1, (t - seg.start) / Math.max(0.1, seg.end - seg.start));
+        const { x, y, w, h } = seg.box;
+        ctx.fillStyle = `rgba(${hlRgba},${hlOpacity})`;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x * canvas.width, y * canvas.height, w * canvas.width * progress, h * canvas.height, h * canvas.height * 0.3);
+        else ctx.rect(x * canvas.width, y * canvas.height, w * canvas.width * progress, h * canvas.height);
+        ctx.fill();
+      }
+      progressFill.style.width = Math.round((srcVideo.currentTime / duration) * 100) + '%';
+      progressPct.textContent = Math.round((srcVideo.currentTime / duration) * 100) + '%';
+      requestAnimationFrame(drawFrame);
+    }
+
+    srcVideo.addEventListener('play', () => requestAnimationFrame(drawFrame), { once: true });
+
+    await new Promise(resolve => {
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = '螢光筆字幕影片.webm';
+        a.click();
+        progressLabel.textContent = '完成！';
+        progressFill.style.width = '100%';
+        progressPct.textContent = '100%';
+        exportBtn.disabled = false;
+        resolve();
+      };
+    });
+  } catch(err) {
+    progressLabel.textContent = '失敗：' + err.message;
+    exportBtn.disabled = false;
+  }
+});
+
+function fmt(s) {
+  if (s == null) return '?';
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(1).padStart(4, '0');
+  return `${m}:${sec}`;
+}
+</script>
+</body>
+</html>
