@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>螢光筆字幕</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #111;
+    --surface: #1c1c1e;
+    --border: #2c2c2e;
+    --accent: #ffd60a;
+    --text: #f5f5f7;
+    --muted: #8e8e93;
+    --radius: 14px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Noto Sans TC', sans-serif;
+    min-height: 100vh;
+    padding-bottom: 40px;
+  }
+
+  .topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .topbar-title { font-size: 17px; font-weight: 700; }
+  .topbar-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .content { padding: 20px 16px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* Steps */
+  .step {
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .step-header {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .step-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #000;
+    font-weight: 800;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-num.done { background: #30d158; }
+  .step-num.inactive { background: var(--border); color: var(--muted); }
+  .step-title { font-size: 15px; font-weight: 600; }
+  .step-body { padding: 18px; }
+
+  /* Upload */
+  .upload-btn {
+    width: 100%;
+    padding: 20px;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    cursor: pointer;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.2s;
+  }
+  .upload-btn:active { border-color: var(--accent); }
+  .upload-btn .icon { font-size: 36px; }
+  .upload-btn .label { font-weight: 600; }
+  .upload-btn .sub { font-size: 13px; color: var(--muted); }
+
+  /* Color picker */
+  .color-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .color-opt {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s;
+    position: relative;
+  }
+  .color-opt.active::after {
+    content: '✓';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 900;
+    color: #000;
+  }
+  .color-opt.active { border-color: white; transform: scale(1.1); }
+
+  /* Opacity slider */
+  .slider-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  .slider-row label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  input[type=range] {
+    flex: 1; appearance: none; height: 4px;
+    background: var(--border); border-radius: 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    appearance: none; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  .slider-val { font-size: 13px; color: var(--accent); min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Status */
+  .status-box {
+    background: rgba(255,214,10,0.08);
+    border: 1px solid rgba(255,214,10,0.2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--accent);
+    display: none;
+    align-items: center;
+    gap: 10px;
+  }
+  .status-box.visible { display: flex; }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Video + canvas overlay */
+  .video-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .video-wrap video { width: 100%; display: block; }
+  .video-wrap canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  /* Segments list */
+  .seg-list { display: flex; flex-direction: column; gap: 8px; }
+  .seg-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .seg-card.active { border-color: var(--accent); background: rgba(255,214,10,0.05); }
+  .seg-card.has-box { border-color: #30d158; }
+  .seg-card.has-box.active { border-color: var(--accent); }
+  .seg-time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .seg-text { font-size: 14px; flex: 1; line-height: 1.5; }
+  .seg-badge {
+    font-size: 10px;
+    background: #30d158;
+    color: #000;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  /* Draw mode banner */
+  .draw-banner {
+    background: var(--accent);
+    color: #000;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .draw-banner.visible { display: flex; }
+  .draw-banner button {
+    background: rgba(0,0,0,0.15);
+    border: none;
+    border-radius: 8px;
+    color: #000;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+
+  /* Draw canvas overlay */
+  .draw-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    cursor: crosshair;
+    z-index: 10;
+    display: none;
+  }
+  .draw-overlay.active { display: block; }
+
+  /* Selection rect */
+  .sel-rect {
+    position: absolute;
+    border: 2px solid var(--accent);
+    background: rgba(255,214,10,0.15);
+    border-radius: 4px;
+    pointer-events: none;
+    display: none;
+    z-index: 11;
+  }
+
+  /* Action buttons */
+  .btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: var(--radius);
+    border: none;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); opacity: 0.8; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Progress */
+  .progress-wrap { display: none; }
+  .progress-wrap.visible { display: block; }
+  .progress-bg { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 10px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #ff9f0a); border-radius: 4px; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+
+  .note-sm { font-size: 12px; color: var(--muted); line-height: 1.6; padding: 0 2px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-title">✨ 螢光筆字幕</div>
+    <div class="topbar-sub">像麥克筆劃過文字的卡拉OK效果</div>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- Step 1: Upload -->
+  <div class="step" id="step1">
+    <div class="step-header">
+      <div class="step-num" id="num1">1</div>
+      <div class="step-title">上傳影片</div>
+    </div>
+    <div class="step-body">
+      <label class="upload-btn" for="fileInput">
+        <span class="icon">🎬</span>
+        <span class="label">點此選擇影片</span>
+        <span class="sub">MP4、MOV、WebM</span>
+      </label>
+      <input type="file" id="fileInput" accept="video/*" style="display:none">
+    </div>
+  </div>
+
+  <!-- Step 2: Color -->
+  <div class="step" id="step2">
+    <div class="step-header">
+      <div class="step-num inactive" id="num2">2</div>
+      <div class="step-title">選擇螢光筆顏色</div>
+    </div>
+    <div class="step-body">
+      <div class="color-row" id="colorRow">
+        <div class="color-opt active" style="background:#ffd60a" data-color="#ffd60a" data-rgba="255,214,10"></div>
+        <div class="color-opt" style="background:#ff6b6b" data-color="#ff6b6b" data-rgba="255,107,107"></div>
+        <div class="color-opt" style="background:#4ade80" data-color="#4ade80" data-rgba="74,222,128"></div>
+        <div class="color-opt" style="background:#60a5fa" data-color="#60a5fa" data-rgba="96,165,250"></div>
+        <div class="color-opt" style="background:#f472b6" data-color="#f472b6" data-rgba="244,114,182"></div>
+        <div class="color-opt" style="background:#fb923c" data-color="#fb923c" data-rgba="251,146,60"></div>
+      </div>
+      <div class="slider-row">
+        <label>透明度</label>
+        <input type="range" id="opacitySlider" min="20" max="80" value="45">
+        <span class="slider-val" id="opacityVal">45%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="status-box" id="statusBox">
+    <span id="statusIcon">⏳</span>
+    <span id="statusText">準備中…</span>
+  </div>
+
+  <!-- Step 3: Preview + Mark -->
+  <div class="step hidden" id="step3">
+    <div class="step-header">
+      <div class="step-num inactive" id="num3">3</div>
+      <div class="step-title">標記字幕位置</div>
+    </div>
+    <div class="step-body" style="display:flex;flex-direction:column;gap:14px">
+
+      <p class="note-sm">播放影片 → 點下方某段字幕 → 用手指在影片上框選那行字的位置 → 重複每段</p>
+
+      <div class="draw-banner" id="drawBanner">
+        <span>✏️ 用手指框選字幕位置</span>
+        <button id="cancelDraw">取消</button>
+      </div>
+
+      <div class="video-wrap" id="videoWrap">
+        <video id="previewVideo" playsinline webkit-playsinline controls></video>
+        <canvas id="previewCanvas"></canvas>
+        <div class="draw-overlay" id="drawOverlay"></div>
+        <div class="sel-rect" id="selRect"></div>
+      </div>
+
+      <div class="seg-list" id="segList"></div>
+
+      <button class="btn btn-secondary" id="transcribeBtn" style="display:none">
+        🔄 重新辨識語音
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 4: Export -->
+  <div class="step hidden" id="step4">
+    <div class="step-header">
+      <div class="step-num inactive" id="num4">4</div>
+      <div class="step-title">匯出影片</div>
+    </div>
+    <div class="step-body" style="display:flex;flex-direction:column;gap:14px">
+      <p class="note-sm">⚠️ 匯出格式為 WebM。iPhone 用戶建議之後用電腦轉成 MP4。</p>
+      <button class="btn btn-primary" id="exportBtn">⬇️ 匯出影片</button>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-label">
+          <span id="progressLabel">合成中…</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-bg">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+env.allowLocalModels = false;
+
+// State
+let videoFile = null;
+let segments = []; // [{start, end, text, box: {x,y,w,h} in ratio}]
+let hlColor = { hex: '#ffd60a', rgba: '255,214,10' };
+let hlOpacity = 0.45;
+let drawingSegIdx = null;
+let drawStart = null;
+let transcriber = null;
+let isDrawing = false;
+
+// Elements
+const fileInput = document.getElementById('fileInput');
+const previewVideo = document.getElementById('previewVideo');
+const previewCanvas = document.getElementById('previewCanvas');
+const drawOverlay = document.getElementById('drawOverlay');
+const selRect = document.getElementById('selRect');
+const segList = document.getElementById('segList');
+const drawBanner = document.getElementById('drawBanner');
+const statusBox = document.getElementById('statusBox');
+const statusIcon = document.getElementById('statusIcon');
+const statusText = document.getElementById('statusText');
+const exportBtn = document.getElementById('exportBtn');
+const progressWrap = document.getElementById('progressWrap');
+const progressFill = document.getElementById('progressFill');
+const progressPct = document.getElementById('progressPct');
+const progressLabel = document.getElementById('progressLabel');
+const videoWrap = document.getElementById('videoWrap');
+
+// Upload
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+async function handleFile(file) {
+  videoFile = file;
+  previewVideo.src = URL.createObjectURL(file);
+  await previewVideo.load();
+
+  document.getElementById('num2').classList.remove('inactive');
+  document.getElementById('step3').classList.remove('hidden');
+  document.getElementById('step4').classList.remove('hidden');
+  document.getElementById('num1').classList.add('done');
+  document.getElementById('num1').textContent = '✓';
+
+  setStatus('⏳', '下載語音辨識模型中（首次約需1分鐘）…');
+  statusBox.classList.add('visible');
+
+  await runTranscription(file);
+}
+
+async function runTranscription(file) {
+  try {
+    if (!transcriber) {
+      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+        progress_callback: p => {
+          if (p.status === 'downloading') {
+            const pct = p.progress ? Math.round(p.progress) : 0;
+            setStatus('⏳', `下載模型 ${pct}%…`);
+          }
+        }
+      });
+    }
+
+    setStatus('⏳', '語音辨識中…');
+
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const buf = await file.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(buf);
+    const float32 = audioBuf.getChannelData(0);
+
+    const result = await transcriber(float32, {
+      language: 'zh',
+      task: 'transcribe',
+      return_timestamps: true,
+      chunk_length_s: 30,
+      stride_length_s: 5,
+    });
+
+    buildSegments(result);
+    setStatus('✅', `辨識完成！共 ${segments.length} 段，請逐一框選字幕位置`);
+    document.getElementById('num3').classList.remove('inactive');
+    document.getElementById('num4').classList.remove('inactive');
+    document.getElementById('transcribeBtn').style.display = 'block';
+    renderSegList();
+
+  } catch(err) {
+    setStatus('❌', '辨識失敗：' + err.message);
+    console.error(err);
+  }
+}
+
+function buildSegments(result) {
+  segments = [];
+  if (result.chunks && result.chunks.length > 0) {
+    result.chunks.forEach(c => {
+      const text = c.text.trim();
+      if (!text) return;
+      segments.push({
+        start: c.timestamp[0] || 0,
+        end: c.timestamp[1] || (c.timestamp[0] + 2),
+        text,
+        box: null,
+      });
+    });
+  } else {
+    segments.push({
+      start: 0,
+      end: previewVideo.duration || 10,
+      text: result.text.trim(),
+      box: null,
+    });
+  }
+}
+
+function renderSegList() {
+  segList.innerHTML = '';
+  segments.forEach((seg, i) => {
+    const card = document.createElement('div');
+    card.className = 'seg-card' + (seg.box ? ' has-box' : '');
+    card.dataset.idx = i;
+
+    const time = document.createElement('div');
+    time.className = 'seg-time';
+    time.textContent = fmt(seg.start) + '\n' + fmt(seg.end);
+    time.style.whiteSpace = 'pre';
+
+    const text = document.createElement('div');
+    text.className = 'seg-text';
+    text.textContent = seg.text;
+
+    card.appendChild(time);
+    card.appendChild(text);
+
+    if (seg.box) {
+      const badge = document.createElement('div');
+      badge.className = 'seg-badge';
+      badge.textContent = '已框選';
+      card.appendChild(badge);
+    }
+
+    card.addEventListener('click', () => startDraw(i));
+    segList.appendChild(card);
+  });
+}
+
+// Drawing
+function startDraw(idx) {
+  drawingSegIdx = idx;
+  previewVideo.currentTime = segments[idx].start;
+  drawOverlay.classList.add('active');
+  drawBanner.classList.add('visible');
+
+  // scroll to video
+  videoWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Highlight card
+  document.querySelectorAll('.seg-card').forEach((c, i) => {
+    c.classList.toggle('active', i === idx);
+  });
+}
+
+document.getElementById('cancelDraw').addEventListener('click', () => {
+  drawOverlay.classList.remove('active');
+  drawBanner.classList.remove('visible');
+  drawingSegIdx = null;
+  selRect.style.display = 'none';
+});
+
+// Touch / mouse draw on overlay
+function getPos(e, el) {
+  const rect = el.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) / rect.width,
+    y: (clientY - rect.top) / rect.height,
+  };
+}
+
+drawOverlay.addEventListener('touchstart', e => {
+  e.preventDefault();
+  isDrawing = true;
+  drawStart = getPos(e, videoWrap);
+  selRect.style.display = 'block';
+  updateSelRect(drawStart, drawStart);
+}, { passive: false });
+
+drawOverlay.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!isDrawing) return;
+  const cur = getPos(e, videoWrap);
+  updateSelRect(drawStart, cur);
+}, { passive: false });
+
+drawOverlay.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (!isDrawing) return;
+  isDrawing = false;
+  const cur = getPos(e.changedTouches ? { touches: e.changedTouches } : e, videoWrap);
+  finishDraw(drawStart, cur);
+});
+
+drawOverlay.addEventListener('mousedown', e => {
+  isDrawing = true;
+  drawStart = getPos(e, videoWrap);
+  selRect.style.display = 'block';
+});
+drawOverlay.addEventListener('mousemove', e => {
+  if (!isDrawing) return;
+  updateSelRect(drawStart, getPos(e, videoWrap));
+});
+drawOverlay.addEventListener('mouseup', e => {
+  if (!isDrawing) return;
+  isDrawing = false;
+  finishDraw(drawStart, getPos(e, videoWrap));
+});
+
+function updateSelRect(a, b) {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x);
+  const h = Math.abs(a.y - b.y);
+  selRect.style.left = (x * 100) + '%';
+  selRect.style.top = (y * 100) + '%';
+  selRect.style.width = (w * 100) + '%';
+  selRect.style.height = (h * 100) + '%';
+}
+
+function finishDraw(a, b) {
+  selRect.style.display = 'none';
+  if (drawingSegIdx === null) return;
+
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x);
+  const h = Math.abs(a.y - b.y);
+
+  if (w < 0.05 || h < 0.01) return; // too small
+
+  segments[drawingSegIdx].box = { x, y, w, h };
+  drawOverlay.classList.remove('active');
+  drawBanner.classList.remove('visible');
+  drawingSegIdx = null;
+  renderSegList();
+
+  // auto-advance to next unboxed
+  const next = segments.findIndex((s, i) => i > drawingSegIdx && !s.box);
+  // drawingSegIdx is already null, use last set
+  const justDone = segments.findLastIndex(s => s.box);
+  const nextIdx = segments.findIndex((s, i) => i > justDone && !s.box);
+  if (nextIdx !== -1) {
+    setTimeout(() => startDraw(nextIdx), 400);
+  }
+}
+
+// Preview canvas: draw highlight sweep
+previewVideo.addEventListener('timeupdate', drawHighlight);
+previewVideo.addEventListener('seeked', drawHighlight);
+
+function drawHighlight() {
+  const canvas = previewCanvas;
+  const video = previewVideo;
+  canvas.width = video.videoWidth || video.clientWidth;
+  canvas.height = video.videoHeight || video.clientHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const t = video.currentTime;
+  const seg = segments.find(s => t >= s.start && t <= s.end + 0.05);
+  if (!seg || !seg.box) return;
+
+  const progress = Math.min(1, (t - seg.start) / Math.max(0.1, seg.end - seg.start));
+  const { x, y, w, h } = seg.box;
+
+  const px = x * canvas.width;
+  const py = y * canvas.height;
+  const pw = w * canvas.width * progress;
+  const ph = h * canvas.height;
+
+  ctx.fillStyle = `rgba(${hlColor.rgba}, ${hlOpacity})`;
+  ctx.beginPath();
+  ctx.roundRect(px, py, pw, ph, ph * 0.3);
+  ctx.fill();
+}
+
+// Color picker
+document.getElementById('colorRow').addEventListener('click', e => {
+  const opt = e.target.closest('.color-opt');
+  if (!opt) return;
+  document.querySelectorAll('.color-opt').forEach(o => o.classList.remove('active'));
+  opt.classList.add('active');
+  hlColor = { hex: opt.dataset.color, rgba: opt.dataset.rgba };
+});
+
+document.getElementById('opacitySlider').addEventListener('input', e => {
+  hlOpacity = e.target.value / 100;
+  document.getElementById('opacityVal').textContent = e.target.value + '%';
+  drawHighlight();
+});
+
+// Retranscribe
+document.getElementById('transcribeBtn').addEventListener('click', () => {
+  if (videoFile) runTranscription(videoFile);
+});
+
+// Export
+exportBtn.addEventListener('click', exportVideo);
+
+async function exportVideo() {
+  exportBtn.disabled = true;
+  progressWrap.classList.add('visible');
+
+  try {
+    const srcVideo = document.createElement('video');
+    srcVideo.src = previewVideo.src;
+    srcVideo.muted = false;
+    await new Promise(r => { srcVideo.onloadedmetadata = r; });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = srcVideo.videoWidth;
+    canvas.height = srcVideo.videoHeight;
+    const ctx = canvas.getContext('2d');
+    const duration = srcVideo.duration;
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+    const src = audioCtx.createMediaElementSource(srcVideo);
+    src.connect(dest);
+    src.connect(audioCtx.destination);
+
+    const stream = canvas.captureStream(30);
+    dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.start(100);
+    srcVideo.play();
+
+    function drawFrame() {
+      if (srcVideo.ended || srcVideo.currentTime >= duration - 0.05) {
+        recorder.stop();
+        return;
+      }
+      ctx.drawImage(srcVideo, 0, 0, canvas.width, canvas.height);
+
+      const t = srcVideo.currentTime;
+      const seg = segments.find(s => t >= s.start && t <= s.end + 0.05);
+      if (seg && seg.box) {
+        const progress = Math.min(1, (t - seg.start) / Math.max(0.1, seg.end - seg.start));
+        const { x, y, w, h } = seg.box;
+        const px = x * canvas.width;
+        const py = y * canvas.height;
+        const pw = w * canvas.width * progress;
+        const ph = h * canvas.height;
+
+        ctx.fillStyle = `rgba(${hlColor.rgba}, ${hlOpacity})`;
+        ctx.beginPath();
+        ctx.roundRect(px, py, pw, ph, ph * 0.3);
+        ctx.fill();
+      }
+
+      const pct = Math.round((srcVideo.currentTime / duration) * 100);
+      progressFill.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+      requestAnimationFrame(drawFrame);
+    }
+
+    srcVideo.addEventListener('play', () => requestAnimationFrame(drawFrame), { once: true });
+
+    await new Promise(resolve => {
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = '螢光筆字幕影片.webm';
+        a.click();
+        progressLabel.textContent = '完成！';
+        progressFill.style.width = '100%';
+        progressPct.textContent = '100%';
+        exportBtn.disabled = false;
+        resolve();
+      };
+    });
+
+  } catch(err) {
+    console.error(err);
+    progressLabel.textContent = '失敗：' + err.message;
+    exportBtn.disabled = false;
+  }
+}
+
+function setStatus(icon, msg) {
+  statusIcon.textContent = icon;
+  statusText.textContent = msg;
+}
+
+function fmt(s) {
+  if (s == null) return '?';
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(1).padStart(4, '0');
+  return `${m}:${sec}`;
+}
+</script>
+</body>
+</html>
